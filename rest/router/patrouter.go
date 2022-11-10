@@ -4,6 +4,8 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/http/httputil"
+	"net/url"
 	"path"
 	"strings"
 
@@ -25,6 +27,7 @@ var (
 )
 
 type patRouter struct {
+	proxys     map[string]*url.URL
 	nodes      map[string]http.Handler
 	trees      map[string]*search.Tree
 	notFound   http.Handler
@@ -34,12 +37,21 @@ type patRouter struct {
 // NewRouter returns a httpx.Router.
 func NewRouter() httpx.Router {
 	return &patRouter{
-		nodes: make(map[string]http.Handler),
-		trees: make(map[string]*search.Tree),
+		proxys: make(map[string]*url.URL),
+		nodes:  make(map[string]http.Handler),
+		trees:  make(map[string]*search.Tree),
 	}
 }
 
+func (pr *patRouter) Proxy(match string, target *url.URL) {
+	pr.proxys[match] = target
+}
+
 func (pr *patRouter) Handle(reqPath string, handler http.Handler) {
+	pr.nodes[reqPath] = handler
+}
+
+func (pr *patRouter) HandleHub(reqPath string, handler http.Handler) {
 	pr.nodes[reqPath] = handler
 	pr.nodes[fmt.Sprintf("%s/negotiate", reqPath)] = handler
 }
@@ -66,6 +78,7 @@ func (pr *patRouter) HandleMethod(method, reqPath string, handler http.Handler) 
 
 func (pr *patRouter) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	reqPath := path.Clean(r.URL.Path)
+
 	if hander, ok := pr.nodes[reqPath]; ok {
 		hander.ServeHTTP(w, r)
 		return
@@ -76,6 +89,14 @@ func (pr *patRouter) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				r = pathvar.WithVars(r, result.Params)
 			}
 			result.Item.(http.Handler).ServeHTTP(w, r)
+			return
+		}
+	}
+
+	for m, u := range pr.proxys {
+		if strings.HasPrefix(reqPath, m) {
+			r.Header.Set("X-real-ip", r.RemoteAddr)
+			httputil.NewSingleHostReverseProxy(u).ServeHTTP(w, r)
 			return
 		}
 	}

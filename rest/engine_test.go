@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -335,6 +336,12 @@ func (m mockedRouter) ServeHTTP(_ http.ResponseWriter, _ *http.Request) {
 }
 
 func (m mockedRouter) Handle(_ string, handler http.Handler) {
+
+}
+func (m mockedRouter) HandleHub(_ string, handler http.Handler) {
+
+}
+func (pr mockedRouter) Proxy(match string, target *url.URL) {
 
 }
 

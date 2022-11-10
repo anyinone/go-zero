@@ -10,7 +10,6 @@ import (
 	"reflect"
 	"runtime/debug"
 
-	"github.com/anyinone/go-zero/rest/httpx"
 	"github.com/anyinone/jsoniter"
 	"github.com/go-kit/log"
 )
@@ -30,7 +29,7 @@ import (
 // Note that HubClients.Caller() returns nil, because there is no real caller which can be reached over a HubConnection.
 type Server interface {
 	Party
-	MapHTTP(router httpx.Router, path string)
+	HttpHandler() http.Handler
 	Serve(conn Connection) error
 	HubClients() HubClients
 	availableTransports() []string
@@ -97,10 +96,9 @@ func WithHTTPServeMux(serveMux *http.ServeMux) func() MappableRouter {
 	}
 }
 
-// MapHTTP maps the servers' hub to a path in a MappableRouter
-func (s *server) MapHTTP(router httpx.Router, path string) {
-	httpMux := newHTTPMux(s, s._newConnectionIdFunc)
-	router.Handle(path, httpMux)
+// HttpHandler the servers maps handler
+func (s *server) HttpHandler() http.Handler {
+	return newHTTPMux(s, s._newConnectionIdFunc)
 }
 
 // Serve serves the hub of the server on one connection.

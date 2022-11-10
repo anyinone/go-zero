@@ -6,7 +6,9 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"net/url"
 	"path"
+	"strings"
 	"time"
 
 	"github.com/anyinone/go-zero/core/logx"
@@ -77,11 +79,33 @@ func (s *Server) AddRoute(r Route, opts ...RouteOption) {
 	s.AddRoutes([]Route{r}, opts...)
 }
 
-// AddHub adds given hub into the server
-func (s *Server) AddHub(path string, options ...func(signalr.Party) error) signalr.HubClients {
-	server, _ := signalr.NewServer(context.Background(), options...)
-	server.MapHTTP(s.router, path)
+// AddHub add given signalr hub into the Server
+func (s *Server) AddHub(path string, hub signalr.HubInterface, newId func() string) signalr.HubClients {
+	server, _ := signalr.NewServer(context.Background(),
+		signalr.UseHub(hub),
+		signalr.EnableDetailedErrors(false),
+		signalr.SetNewConnectionIdFunc(newId),
+		signalr.TimeoutInterval(time.Duration(s.ngin.conf.Hub.Timeout)*time.Millisecond),
+		signalr.MaximumReceiveMessageSize(uint(s.ngin.conf.Hub.MaximumReceiveMessageSize)),
+		signalr.AllowOriginPatterns(strings.Split(s.ngin.conf.Hub.AllowOriginPatterns, ";")),
+		signalr.KeepAliveInterval(time.Duration(s.ngin.conf.Hub.KeepAliveInterval)*time.Millisecond))
+	s.router.HandleHub(path, server.HttpHandler())
 	return server.HubClients()
+}
+
+// AddProxy add given proxy into target server of request path start with match.
+func (s *Server) AddProxy(match string, target *url.URL) {
+	s.router.Proxy(match, target)
+}
+
+// AddHandler add given handler into the Server.
+func (s *Server) AddHandler(path string, hander http.Handler) {
+	s.router.Handle(path, hander)
+}
+
+// AddHandler add given hub handler into the Server.
+func (s *Server) AddHubHandler(path string, hander http.Handler) {
+	s.router.HandleHub(path, hander)
 }
 
 // PrintRoutes prints the added routes to stdout.

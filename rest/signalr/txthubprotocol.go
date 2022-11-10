@@ -2,15 +2,15 @@ package signalr
 
 import (
 	"bytes"
-	"encoding/base64"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"io"
 	"reflect"
-	"strings"
 
 	"github.com/anyinone/jsoniter"
 	"github.com/go-kit/log"
+	"github.com/vmihailenco/msgpack/v5"
 )
 
 // txtHubProtocol is the JSON based SignalR protocol
@@ -67,14 +67,17 @@ func (j *txtHubProtocol) UnmarshalArgument(src interface{}, dst interface{}) err
 
 // ParseMessages reads all messages from the reader and puts the remaining bytes into remainBuf
 func (j *txtHubProtocol) ParseMessages(reader io.Reader, remainBuf *bytes.Buffer) (messages []interface{}, err error) {
-	frames, err := readTxtFrames(reader, remainBuf)
+	frames, err := j.readTxtFrames(reader, remainBuf)
 	if err != nil {
 		return nil, err
 	}
 	message := hubMessage{}
 	messages = make([]interface{}, 0)
 	for _, frame := range frames {
-		frame, _ := base64.URLEncoding.DecodeString(strings.ReplaceAll(string(frame), " ", "+"))
+		for i, v := range frame {
+			frame[i] = 0xff - v
+		}
+		frame, _ = msgpack.NewDecoder(bytes.NewReader(frame)).DecodeBytes()
 		err = jsoniter.Unmarshal(frame, &message)
 		_ = j.dbg.Log(evt, "read", msg, string(frame))
 		if err != nil {
@@ -154,71 +157,99 @@ func (j *txtHubProtocol) parseMessage(messageType int, text []byte) (message int
 		return nil, nil
 	}
 }
-
-// readTxtFrames reads all complete frames (delimited by 0x1e) from the reader and puts the remaining bytes into remainBuf
-func readTxtFrames(reader io.Reader, remainBuf *bytes.Buffer) ([][]byte, error) {
-	p := make([]byte, 1<<15)
-	buf := &bytes.Buffer{}
-	_, _ = buf.ReadFrom(remainBuf)
-	// Try getting data until at least one frame is available
+func (m *txtHubProtocol) readTxtFrames(reader io.Reader, remainBuf *bytes.Buffer) ([][]byte, error) {
+	frames := make([][]byte, 0)
 	for {
-		n, err := reader.Read(p)
-		// Some reader implementations return io.EOF additionally to n=0 if no data could be read
+		// Try to get the frame length
+		frameLenBuf := make([]byte, binary.MaxVarintLen32)
+		n1, err := remainBuf.Read(frameLenBuf)
 		if err != nil && !errors.Is(err, io.EOF) {
+			// Some weird other error
 			return nil, err
 		}
-		if n > 0 {
-			_, _ = buf.Write(p[:n])
-			frames, err := parseTxtFrames(buf)
+		n2, err := reader.Read(frameLenBuf[n1:])
+		if err != nil && !errors.Is(err, io.EOF) {
+			// Some weird other error
+			return nil, err
+		}
+		frameLen, lenLen := binary.Uvarint(frameLenBuf[:n1+n2])
+		if lenLen == 0 {
+			// reader could not supply enough bytes to decode the Uvarint
+			// Store the already read bytes in the remainBuf for next iteration
+			_, _ = remainBuf.Write(frameLenBuf[:n1+n2])
+			return frames, nil
+		}
+		if lenLen < 0 {
+			return nil, fmt.Errorf("messagepack frame length to large")
+		}
+		// Still wondering why this happens, but it happens!
+		if frameLen == 0 {
+			// Store the overread bytes for the next iteration
+			_, _ = remainBuf.Write(frameLenBuf[lenLen:])
+			continue
+		}
+		// Try getting data until at least one frame is available
+		readBuf := make([]byte, frameLen)
+		frameBuf := &bytes.Buffer{}
+		// Did we read too many bytes when detecting the frameLen?
+		_, _ = frameBuf.Write(frameLenBuf[lenLen:])
+		// Read the rest of the bytes from the last iteration
+		_, _ = frameBuf.ReadFrom(remainBuf)
+		for {
+			n, err := reader.Read(readBuf)
+			if errors.Is(err, io.EOF) {
+				// Less than frameLen. Let the caller parse the already read frames and come here again later
+				_, _ = remainBuf.ReadFrom(frameBuf)
+				return frames, nil
+			}
 			if err != nil {
 				return nil, err
 			}
-			if len(frames) > 0 {
-				_, _ = remainBuf.ReadFrom(buf)
+			_, _ = frameBuf.Write(readBuf[:n])
+			if frameBuf.Len() == int(frameLen) {
+				// Frame completely read. Return it to the caller
+				frames = append(frames, frameBuf.Next(int(frameLen)))
 				return frames, nil
+			}
+			if frameBuf.Len() > int(frameLen) {
+				// More than frameLen. Append the current frame to the result and start reading the next frame
+				frames = append(frames, frameBuf.Next(int(frameLen)))
+				_, _ = remainBuf.ReadFrom(frameBuf)
+				break
 			}
 		}
 	}
-}
-
-func parseTxtFrames(buf *bytes.Buffer) ([][]byte, error) {
-	frames := make([][]byte, 0)
-	for {
-		frame, err := buf.ReadBytes(0x1e)
-		if errors.Is(err, io.EOF) {
-			// Restore incomplete frame in buffer
-			_, _ = buf.Write(frame)
-			break
-		}
-		if err != nil {
-			return nil, err
-		}
-		frames = append(frames, frame[:len(frame)-1])
-	}
-	return frames, nil
 }
 
 // WriteMessage writes a message as JSON to the specified writer
 func (j *txtHubProtocol) WriteMessage(message interface{}, writer io.Writer) error {
-	var b []byte
-	var err error
-	b, err = jsoniter.Marshal(message)
-	if err == nil {
-		b = []byte(base64.URLEncoding.EncodeToString(b))
-	}
+	buffer, err := jsoniter.Marshal(message)
 	if err != nil {
 		return err
 	}
-	b = append(b, 0x1e)
-	_ = j.dbg.Log(evt, "write", msg, string(b))
-	_, err = writer.Write(b)
+
+	_ = j.dbg.Log(evt, "write", msg, string(buffer))
+	buf := &bytes.Buffer{}
+	msgpack.NewEncoder(buf).Encode(string(buffer))
+
+	// Build frame with length information
+	frameBuf := &bytes.Buffer{}
+	lenBuf := make([]byte, binary.MaxVarintLen32)
+	lenLen := binary.PutUvarint(lenBuf, uint64(buf.Len()))
+	if _, err := frameBuf.Write(lenBuf[:lenLen]); err != nil {
+		return err
+	}
+	for _, v := range buf.Bytes() {
+		frameBuf.WriteByte(0xff - v)
+	}
+	_, err = frameBuf.WriteTo(writer)
 	return err
 }
 
 func (j *txtHubProtocol) transferMode() TransferMode {
-	return TextTransferMode
+	return BinaryTransferMode
 }
 
 func (j *txtHubProtocol) setDebugLogger(dbg StructuredLogger) {
-	j.dbg = log.WithPrefix(dbg, "ts", log.DefaultTimestampUTC, "protocol", "JSON")
+	j.dbg = log.WithPrefix(dbg, "ts", log.DefaultTimestampUTC, "protocol", "Txt")
 }

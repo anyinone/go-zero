@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"github.com/anyinone/go-zero/core/service"
+	"github.com/anyinone/go-zero/rest/signalr"
 )
 
 type (
@@ -40,5 +41,6 @@ type (
 		Timeout      int64         `json:",default=3000"`
 		CpuThreshold int64         `json:",default=900,range=[0:1000]"`
 		Signature    SignatureConf `json:",optional"`
+		Hub          signalr.HubConf
 	}
 )
