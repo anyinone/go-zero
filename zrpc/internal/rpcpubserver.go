@@ -1,6 +1,7 @@
 package internal
 
 import (
+	"net"
 	"os"
 	"strings"
 
@@ -47,6 +48,14 @@ func (s keepAliveServer) Start(fn RegisterFn) error {
 	}
 
 	return s.Server.Start(fn)
+}
+
+func (s keepAliveServer) StartWithListener(ls net.Listener, fn RegisterFn) error {
+	if err := s.registerEtcd(); err != nil {
+		return err
+	}
+
+	return s.Server.StartWithListener(ls, fn)
 }
 
 func figureOutListenOn(listenOn string) string {
