@@ -162,15 +162,6 @@ func (h *httpMux) handleWebsocket(writer http.ResponseWriter, request *http.Requ
 	}
 	websocketConn.SetReadLimit(int64(h.server.maximumReceiveMessageSize()))
 	connectionMapKey := request.URL.Query().Get("id")
-	if connectionMapKey == "" {
-		// Support websocket connection without negotiate
-		connectionMapKey = h.funcId()
-		h.mx.Lock()
-		h.connectionMap[connectionMapKey] = &negotiateConnection{
-			ConnectionBase{connectionID: connectionMapKey},
-		}
-		h.mx.Unlock()
-	}
 	h.mx.RLock()
 	c, ok := h.connectionMap[connectionMapKey]
 	h.mx.RUnlock()
@@ -195,7 +186,7 @@ func (h *httpMux) handleWebsocket(writer http.ResponseWriter, request *http.Requ
 func (h *httpMux) negotiate(w http.ResponseWriter, req *http.Request) {
 	connectionID := h.funcId()
 	connectionMapKey := connectionID
-	negotiateVersion, err := strconv.Atoi(req.Header.Get("negotiateVersion"))
+	negotiateVersion, err := strconv.Atoi(req.URL.Query().Get("negotiateVersion"))
 	if err != nil {
 		negotiateVersion = 0
 	}
