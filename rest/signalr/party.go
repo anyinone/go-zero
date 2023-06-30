@@ -54,6 +54,7 @@ type Party interface {
 	maximumReceiveMessageSize() uint
 	setMaximumReceiveMessageSize(size uint)
 	setNewConnectionIdFunc(func() string)
+	createId() string
 }
 
 func newPartyBase(parentContext context.Context, info log.Logger, dbg log.Logger) partyBase {
@@ -194,4 +195,8 @@ func (p *partyBase) loggers() (info StructuredLogger, debug StructuredLogger) {
 
 func (p *partyBase) setNewConnectionIdFunc(f func() string) {
 	p._newConnectionIdFunc = f
+}
+
+func (p *partyBase) createId() string {
+	return p._newConnectionIdFunc()
 }

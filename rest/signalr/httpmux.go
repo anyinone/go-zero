@@ -5,7 +5,6 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/anyinone/jsoniter"
@@ -14,17 +13,12 @@ import (
 )
 
 type httpMux struct {
-	mx            sync.RWMutex
-	connectionMap map[string]Connection
-	server        Server
-	funcId        func() string
+	server Server
 }
 
-func newHTTPMux(server Server, makeId func() string) *httpMux {
+func newHTTPMux(server Server) *httpMux {
 	return &httpMux{
-		connectionMap: make(map[string]Connection),
-		server:        server,
-		funcId:        makeId,
+		server: server,
 	}
 }
 
@@ -51,24 +45,16 @@ func (h *httpMux) handlePost(writer http.ResponseWriter, request *http.Request) 
 	}
 	info, _ := h.server.prefixLoggers("")
 	for {
-		h.mx.RLock()
-		c, ok := h.connectionMap[connectionID]
-		h.mx.RUnlock()
-		if ok {
-			// Connection is initiated
-			switch conn := c.(type) {
-			case *serverSSEConnection:
-				writer.WriteHeader(conn.consumeRequest(request))
-				return
-			case *negotiateConnection:
-				// connection start initiated but not completed
-			default:
-				// ConnectionID already used for WebSocket(?)
-				writer.WriteHeader(http.StatusConflict)
-				return
-			}
-		} else {
-			writer.WriteHeader(http.StatusNotFound)
+		c := h.Load(connectionID)
+		switch conn := c.(type) {
+		case *serverSSEConnection:
+			writer.WriteHeader(conn.consumeRequest(request))
+			return
+		case *negotiateConnection:
+			// connection start initiated but not completed
+		default:
+			// ConnectionID already used for WebSocket(?)
+			writer.WriteHeader(http.StatusConflict)
 			return
 		}
 		<-time.After(10 * time.Millisecond)
@@ -100,50 +86,44 @@ func (h *httpMux) handleServerSentEvent(writer http.ResponseWriter, request *htt
 		writer.WriteHeader(http.StatusBadRequest)
 		return
 	}
-	h.mx.RLock()
-	c, ok := h.connectionMap[connectionID]
-	h.mx.RUnlock()
-	if ok {
-		if _, ok := c.(*negotiateConnection); ok {
-			ctx, _ := onecontext.Merge(h.server.context(), request.Context())
-			sseConn, jobChan, jobResultChan, err := newServerSSEConnection(ctx, c.ConnectionID())
-			if err != nil {
-				writer.WriteHeader(http.StatusInternalServerError)
-				return
-			}
-			flusher, ok := writer.(http.Flusher)
-			if !ok {
-				writer.WriteHeader(http.StatusInternalServerError)
-				return
-			}
-			// Connection is negotiated but not initiated
-			// We compose http and send it over sse
-			writer.Header().Set("Content-Type", "text/event-stream")
-			writer.Header().Set("Connection", "keep-alive")
-			writer.Header().Set("Cache-Control", "no-cache")
-			writer.WriteHeader(http.StatusOK)
-			// End this Server Sent Event (yes, your response now is one and the client will wait for this initial event to end)
-			_, _ = fmt.Fprint(writer, ":\r\n\r\n")
-			writer.(http.Flusher).Flush()
-			go func() {
-				// We can't WriteHeader 500 if we get an error as we already wrote the header, so ignore it.
-				_ = h.serveConnection(sseConn)
-			}()
-			// Loop for write jobs from the sseServerConnection
-			for buf := range jobChan {
-				n, err := writer.Write(buf)
-				if err == nil {
-					flusher.Flush()
-				}
-				jobResultChan <- RWJobResult{n: n, err: err}
-			}
-			close(jobResultChan)
-		} else {
-			// connectionID in use
-			writer.WriteHeader(http.StatusConflict)
+	c := h.Load(connectionID)
+	if _, ok := c.(*negotiateConnection); ok {
+		ctx, _ := onecontext.Merge(h.server.context(), request.Context())
+		sseConn, jobChan, jobResultChan, err := newServerSSEConnection(ctx, c.ConnectionID())
+		if err != nil {
+			writer.WriteHeader(http.StatusInternalServerError)
+			return
 		}
+		flusher, ok := writer.(http.Flusher)
+		if !ok {
+			writer.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+		// Connection is negotiated but not initiated
+		// We compose http and send it over sse
+		writer.Header().Set("Content-Type", "text/event-stream")
+		writer.Header().Set("Connection", "keep-alive")
+		writer.Header().Set("Cache-Control", "no-cache")
+		writer.WriteHeader(http.StatusOK)
+		// End this Server Sent Event (yes, your response now is one and the client will wait for this initial event to end)
+		_, _ = fmt.Fprint(writer, ":\r\n\r\n")
+		writer.(http.Flusher).Flush()
+		go func() {
+			// We can't WriteHeader 500 if we get an error as we already wrote the header, so ignore it.
+			_ = h.server.Serve(sseConn)
+		}()
+		// Loop for write jobs from the sseServerConnection
+		for buf := range jobChan {
+			n, err := writer.Write(buf)
+			if err == nil {
+				flusher.Flush()
+			}
+			jobResultChan <- RWJobResult{n: n, err: err}
+		}
+		close(jobResultChan)
 	} else {
-		writer.WriteHeader(http.StatusNotFound)
+		// connectionID in use
+		writer.WriteHeader(http.StatusConflict)
 	}
 }
 
@@ -162,44 +142,34 @@ func (h *httpMux) handleWebsocket(writer http.ResponseWriter, request *http.Requ
 	}
 	websocketConn.SetReadLimit(int64(h.server.maximumReceiveMessageSize()))
 	connectionMapKey := request.URL.Query().Get("id")
-	h.mx.RLock()
-	c, ok := h.connectionMap[connectionMapKey]
-	h.mx.RUnlock()
-	if ok {
-		if _, ok := c.(*negotiateConnection); ok {
-			// Connection is negotiated but not initiated
-			ctx, _ := onecontext.Merge(h.server.context(), request.Context())
-			err = h.serveConnection(newWebSocketConnection(ctx, c.ConnectionID(), websocketConn))
-			if err != nil {
-				_ = websocketConn.Close(1005, err.Error())
-			}
-		} else {
-			// Already initiated
-			_ = websocketConn.Close(1002, "Bad request")
+	if connectionMapKey == "" {
+		_ = websocketConn.Close(1002, "Bad request")
+		return
+	}
+	c := h.Load(connectionMapKey)
+	if _, ok := c.(*negotiateConnection); ok {
+		// Connection is negotiated but not initiated
+		ctx, _ := onecontext.Merge(h.server.context(), request.Context())
+		err = h.server.Serve(newWebSocketConnection(ctx, c.ConnectionID(), websocketConn))
+		if err != nil {
+			_ = websocketConn.Close(1005, err.Error())
 		}
 	} else {
-		// Not negotiated
-		_ = websocketConn.Close(1002, "Not found")
+		// Already initiated
+		_ = websocketConn.Close(1002, "Bad request")
 	}
 }
 
 func (h *httpMux) negotiate(w http.ResponseWriter, req *http.Request) {
-	connectionID := h.funcId()
-	connectionMapKey := connectionID
+	connectionID := h.server.createId()
 	negotiateVersion, err := strconv.Atoi(req.URL.Query().Get("negotiateVersion"))
 	if err != nil {
 		negotiateVersion = 0
 	}
 	connectionToken := ""
 	if negotiateVersion == 1 {
-		connectionToken = h.funcId()
-		connectionMapKey = connectionToken
+		connectionToken = h.server.createId()
 	}
-	h.mx.Lock()
-	h.connectionMap[connectionMapKey] = &negotiateConnection{
-		ConnectionBase{connectionID: connectionID},
-	}
-	h.mx.Unlock()
 	var availableTransports []availableTransport
 	for _, transport := range h.server.availableTransports() {
 		switch transport {
@@ -224,15 +194,18 @@ func (h *httpMux) negotiate(w http.ResponseWriter, req *http.Request) {
 		AvailableTransports: availableTransports,
 	}
 
+	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	_ = jsoniter.NewEncoder(w).Encode(response) // Can't imagine an error when encoding
 }
 
-func (h *httpMux) serveConnection(c Connection) error {
-	h.mx.Lock()
-	h.connectionMap[c.ConnectionID()] = c
-	h.mx.Unlock()
-	return h.server.Serve(c)
+func (h *httpMux) Load(token string) Connection {
+	if conn, ok := h.server.Load(token); ok {
+		return conn
+	}
+	return &negotiateConnection{
+		ConnectionBase{connectionID: token},
+	}
 }
 
 type negotiateConnection struct {

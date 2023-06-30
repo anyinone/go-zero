@@ -9,6 +9,7 @@ import (
 	"os"
 	"reflect"
 	"runtime/debug"
+	"sync"
 
 	"github.com/anyinone/jsoniter"
 	"github.com/go-kit/log"
@@ -33,6 +34,7 @@ type Server interface {
 	Serve(conn Connection) error
 	HubClients() HubClients
 	availableTransports() []string
+	Load(token string) (conn Connection, ok bool)
 }
 
 type server struct {
@@ -43,6 +45,7 @@ type server struct {
 	groupManager      GroupManager
 	reconnectAllowed  bool
 	transports        []string
+	connectionMap     sync.Map
 }
 
 // NewServer creates a new server for one type of hub. The hub type is set by one of the
@@ -98,15 +101,17 @@ func WithHTTPServeMux(serveMux *http.ServeMux) func() MappableRouter {
 
 // HttpHandler the servers maps handler
 func (s *server) HttpHandler() http.Handler {
-	return newHTTPMux(s, s._newConnectionIdFunc)
+	return newHTTPMux(s)
 }
 
 // Serve serves the hub of the server on one connection.
 // The same server might serve different connections in parallel. Serve does not return until the connection is closed
 // or the servers' context is canceled.
 func (s *server) Serve(conn Connection) error {
+	s.connectionMap.Store(conn.ConnectionID(), conn)
 	protocol, err := s.processHandshake(conn)
 	if err != nil {
+		s.connectionMap.Delete(conn.ConnectionID())
 		info, _ := s.prefixLoggers("")
 		_ = info.Log(evt, "processHandshake", "connectionId", conn.ConnectionID(), "error", err, react, "do not connect")
 		return err
@@ -117,6 +122,13 @@ func (s *server) Serve(conn Connection) error {
 
 func (s *server) HubClients() HubClients {
 	return s.defaultHubClients
+}
+
+func (s *server) Load(token string) (conn Connection, ok bool) {
+	if c, o := s.connectionMap.Load(token); o {
+		return c.(Connection), o
+	}
+	return nil, false
 }
 
 func (s *server) availableTransports() []string {
@@ -136,6 +148,7 @@ func (s *server) onDisconnected(hc hubConnection) {
 		defer s.recoverHubLifeCyclePanic()
 		s.invocationTarget(hc).(HubInterface).OnDisconnected(hc.ConnectionID())
 	}()
+	s.connectionMap.Delete(hc.ConnectionID())
 	s.lifetimeManager.OnDisconnected(hc)
 
 }
