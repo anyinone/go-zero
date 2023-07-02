@@ -89,7 +89,7 @@ func (h *httpMux) handleServerSentEvent(writer http.ResponseWriter, request *htt
 	c := h.Load(connectionID)
 	if _, ok := c.(*negotiateConnection); ok {
 		ctx, _ := onecontext.Merge(h.server.context(), request.Context())
-		sseConn, jobChan, jobResultChan, err := newServerSSEConnection(ctx, c.ConnectionID())
+		sseConn, jobChan, jobResultChan, err := newServerSSEConnection(ctx, c.ConnectionID(), h.LoadRemoteAdd(request))
 		if err != nil {
 			writer.WriteHeader(http.StatusInternalServerError)
 			return
@@ -150,7 +150,7 @@ func (h *httpMux) handleWebsocket(writer http.ResponseWriter, request *http.Requ
 	if _, ok := c.(*negotiateConnection); ok {
 		// Connection is negotiated but not initiated
 		ctx, _ := onecontext.Merge(h.server.context(), request.Context())
-		err = h.server.Serve(newWebSocketConnection(ctx, c.ConnectionID(), websocketConn))
+		err = h.server.Serve(newWebSocketConnection(ctx, c.ConnectionID(), websocketConn, h.LoadRemoteAdd(request)))
 		if err != nil {
 			_ = websocketConn.Close(1005, err.Error())
 		}
@@ -206,6 +206,18 @@ func (h *httpMux) Load(token string) Connection {
 	return &negotiateConnection{
 		ConnectionBase{connectionID: token},
 	}
+}
+
+func (h *httpMux) LoadRemoteAdd(request *http.Request) string {
+	realIp := request.Header.Get("X-real-ip")
+	if len(realIp) > 0 {
+		return realIp
+	}
+	remoteAddr := request.RemoteAddr
+	if strings.Contains(remoteAddr, ":") {
+		return strings.Split(remoteAddr, ":")[0]
+	}
+	return remoteAddr
 }
 
 type negotiateConnection struct {

@@ -13,6 +13,10 @@ import (
 // hubConnection uses a transport connection (of type Connection) and a hubProtocol to send and receive SignalR messages.
 type hubConnection interface {
 	ConnectionID() string
+	UserId() uint64
+	SetUserId(id uint64)
+	Request()
+	Information() ConnectionInfo
 	Receive() <-chan receiveResult
 	SendInvocation(id string, target string, args []interface{}) error
 	SendStreamInvocation(id string, target string, args []interface{}) error
@@ -77,6 +81,23 @@ func (c *defaultHubConnection) Close(errorText string, allowReconnect bool) erro
 
 func (c *defaultHubConnection) ConnectionID() string {
 	return c.connection.ConnectionID()
+}
+
+func (c *defaultHubConnection) UserId() uint64 {
+	return c.connection.UserId()
+}
+
+func (c *defaultHubConnection) Request() {
+	c.connection.Request()
+}
+
+func (c *defaultHubConnection) Information() ConnectionInfo {
+	return c.connection.Information()
+}
+
+// SetUserId sets the userId
+func (c *defaultHubConnection) SetUserId(id uint64) {
+	c.connection.SetUserId(id)
 }
 
 func (c *defaultHubConnection) Context() context.Context {

@@ -8,6 +8,8 @@ package signalr
 type HubClients interface {
 	All() ClientProxy
 	Caller() ClientProxy
+	Connections() []ConnectionInfo
+	User(userId uint64) ClientProxy
 	Client(connectionID string) ClientProxy
 	Group(groupName string) ClientProxy
 }
@@ -17,8 +19,16 @@ type defaultHubClients struct {
 	allCache        allClientProxy
 }
 
+func (c *defaultHubClients) Connections() []ConnectionInfo {
+	return c.allCache.lifetimeManager.Connections()
+}
+
 func (c *defaultHubClients) All() ClientProxy {
 	return &c.allCache
+}
+
+func (c *defaultHubClients) User(userId uint64) ClientProxy {
+	return &userClientProxy{userId: userId, lifetimeManager: c.lifetimeManager}
 }
 
 func (c *defaultHubClients) Client(connectionID string) ClientProxy {
@@ -40,12 +50,20 @@ type callerHubClients struct {
 	connectionID      string
 }
 
+func (c *callerHubClients) Connections() []ConnectionInfo {
+	return c.defaultHubClients.Connections()
+}
+
 func (c *callerHubClients) All() ClientProxy {
 	return c.defaultHubClients.All()
 }
 
 func (c *callerHubClients) Caller() ClientProxy {
 	return c.defaultHubClients.Client(c.connectionID)
+}
+
+func (c *callerHubClients) User(userId uint64) ClientProxy {
+	return c.defaultHubClients.User(userId)
 }
 
 func (c *callerHubClients) Client(connectionID string) ClientProxy {

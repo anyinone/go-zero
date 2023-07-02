@@ -11,7 +11,11 @@ type Connection interface {
 	io.Writer
 	Context() context.Context
 	ConnectionID() string
+	UserId() uint64
+	SetUserId(id uint64)
+	Request()
 	SetConnectionID(id string)
+	Information() ConnectionInfo
 }
 
 // TransferMode is either TextTransferMode or BinaryTransferMode
@@ -29,4 +33,14 @@ const (
 type ConnectionWithTransferMode interface {
 	TransferMode() TransferMode
 	SetTransferMode(transferMode TransferMode)
+}
+
+type ConnectionInfo struct {
+	UserId       string `json:"userId"`
+	OnlineTime   string `json:"onlineTime"`
+	AuthTime     string `json:"authTime"`
+	ConnectionId string `json:"connectionId"`
+	RemoteAddr   string `json:"remoteAddr"`
+	EndpointType string `json:"endPointType"`
+	RequestCount string `json:"requestCount"`
 }

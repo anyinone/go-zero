@@ -23,6 +23,7 @@ func (h *Hub) Initialize(ctx HubContext) {
 	h.cm.Lock()
 	defer h.cm.Unlock()
 	h.context = ctx
+	h.context.Request()
 }
 
 // Clients returns the clients of this hub
@@ -51,6 +52,26 @@ func (h *Hub) ConnectionID() string {
 	h.cm.RLock()
 	defer h.cm.RUnlock()
 	return h.context.ConnectionID()
+}
+
+// Information gets information of the current connection
+func (h *Hub) Information() ConnectionInfo {
+	h.cm.RLock()
+	defer h.cm.RUnlock()
+	return h.context.Information()
+}
+
+func (h *Hub) UserId() uint64 {
+	h.cm.RLock()
+	defer h.cm.RUnlock()
+	return h.context.UserId()
+}
+
+// SetUserId sets the userId
+func (h *Hub) SetUserId(id uint64) {
+	h.cm.Lock()
+	defer h.cm.Unlock()
+	h.context.SetUserId(id)
 }
 
 // Context is the context.Context of the current connection

@@ -17,6 +17,10 @@ type HubContext interface {
 	Groups() GroupManager
 	Items() *sync.Map
 	ConnectionID() string
+	UserId() uint64
+	SetUserId(id uint64)
+	Request()
+	Information() ConnectionInfo
 	Context() context.Context
 	Abort()
 	Logger() (info StructuredLogger, dbg StructuredLogger)
@@ -45,6 +49,23 @@ func (c *connectionHubContext) Items() *sync.Map {
 
 func (c *connectionHubContext) ConnectionID() string {
 	return c.connection.ConnectionID()
+}
+
+func (c *connectionHubContext) UserId() uint64 {
+	return c.connection.UserId()
+}
+
+func (c *connectionHubContext) Request() {
+	c.connection.Request()
+}
+
+// SetUserId sets the userId
+func (c *connectionHubContext) SetUserId(id uint64) {
+	c.connection.SetUserId(id)
+}
+
+func (c *connectionHubContext) Information() ConnectionInfo {
+	return c.connection.Information()
 }
 
 func (c *connectionHubContext) Context() context.Context {

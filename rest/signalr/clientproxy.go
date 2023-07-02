@@ -22,6 +22,15 @@ func (a *singleClientProxy) Send(target string, args ...interface{}) {
 	a.lifetimeManager.InvokeClient(a.connectionID, target, args)
 }
 
+type userClientProxy struct {
+	userId          uint64
+	lifetimeManager HubLifetimeManager
+}
+
+func (a *userClientProxy) Send(target string, args ...interface{}) {
+	a.lifetimeManager.InvokeUser(a.userId, target, args)
+}
+
 type groupClientProxy struct {
 	groupName       string
 	lifetimeManager HubLifetimeManager

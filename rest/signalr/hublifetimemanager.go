@@ -18,6 +18,8 @@ type HubLifetimeManager interface {
 	OnConnected(conn hubConnection)
 	OnDisconnected(conn hubConnection)
 	InvokeAll(target string, args []interface{})
+	Connections() []ConnectionInfo
+	InvokeUser(userId uint64, target string, args []interface{})
 	InvokeClient(connectionID string, target string, args []interface{})
 	InvokeGroup(groupName string, target string, args []interface{})
 	AddToGroup(groupName, connectionID string)
@@ -45,9 +47,29 @@ func (d *defaultHubLifetimeManager) OnDisconnected(conn hubConnection) {
 	d.clients.Delete(conn.ConnectionID())
 }
 
+func (d *defaultHubLifetimeManager) Connections() []ConnectionInfo {
+	infos := make([]ConnectionInfo, 0)
+	d.clients.Range(func(key, value interface{}) bool {
+		if hub, ok := value.(hubConnection); ok {
+			infos = append(infos, hub.Information())
+		}
+		return true
+	})
+	return infos
+}
+
 func (d *defaultHubLifetimeManager) InvokeAll(target string, args []interface{}) {
 	d.clients.Range(func(key, value interface{}) bool {
 		_ = value.(hubConnection).SendInvocation("", target, args)
+		return true
+	})
+}
+
+func (d *defaultHubLifetimeManager) InvokeUser(userId uint64, target string, args []interface{}) {
+	d.clients.Range(func(key, value interface{}) bool {
+		if hub, ok := value.(hubConnection); ok && hub.UserId() == userId {
+			hub.SendInvocation("", target, args)
+		}
 		return true
 	})
 }

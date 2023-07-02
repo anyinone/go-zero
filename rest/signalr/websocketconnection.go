@@ -14,10 +14,10 @@ type webSocketConnection struct {
 	transferMode TransferMode
 }
 
-func newWebSocketConnection(ctx context.Context, connectionID string, conn *websocket.Conn) *webSocketConnection {
+func newWebSocketConnection(ctx context.Context, connectionID string, conn *websocket.Conn, remoteAddr string) *webSocketConnection {
 	w := &webSocketConnection{
 		conn:           conn,
-		ConnectionBase: *NewConnectionBase(ctx, connectionID),
+		ConnectionBase: *NewConnectionBase(ctx, connectionID, remoteAddr),
 	}
 	return w
 }

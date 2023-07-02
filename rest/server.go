@@ -80,9 +80,9 @@ func (s *Server) AddRoute(r Route, opts ...RouteOption) {
 }
 
 // AddHub add given signalr hub into the Server
-func (s *Server) AddHub(path string, hub signalr.HubInterface) signalr.HubClients {
+func (s *Server) AddHub(path string, hubFactory func() signalr.HubInterface) signalr.HubClients {
 	server, _ := signalr.NewServer(context.Background(),
-		signalr.UseHub(hub),
+		signalr.HubFactory(hubFactory),
 		signalr.EnableDetailedErrors(false),
 		signalr.TimeoutInterval(time.Duration(s.ngin.conf.Hub.Timeout)*time.Millisecond),
 		signalr.MaximumReceiveMessageSize(uint(s.ngin.conf.Hub.MaximumReceiveMessageSize)),
