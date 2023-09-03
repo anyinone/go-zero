@@ -45,6 +45,10 @@ func (d *defaultHubLifetimeManager) OnConnected(conn hubConnection) {
 
 func (d *defaultHubLifetimeManager) OnDisconnected(conn hubConnection) {
 	d.clients.Delete(conn.ConnectionID())
+	d.groups.Range(func(key, value interface{}) bool {
+		delete(value.(map[string]hubConnection), conn.ConnectionID())
+		return true
+	})
 }
 
 func (d *defaultHubLifetimeManager) Connections() []ConnectionInfo {
