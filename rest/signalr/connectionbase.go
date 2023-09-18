@@ -54,7 +54,7 @@ func (cb *ConnectionBase) SetUserId(id uint64) {
 	cb.setUserIdTime = time.Now()
 }
 
-// SetUserId sets the userId
+// Request client request
 func (cb *ConnectionBase) Request() {
 	cb.mx.Lock()
 	defer cb.mx.Unlock()
