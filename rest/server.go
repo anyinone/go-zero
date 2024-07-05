@@ -1,14 +1,12 @@
 package rest
 
 import (
-	"context"
 	"crypto/tls"
 	"log"
 	"net"
 	"net/http"
 	"net/url"
 	"path"
-	"strings"
 	"time"
 
 	"github.com/anyinone/go-zero/core/logx"
@@ -17,7 +15,6 @@ import (
 	"github.com/anyinone/go-zero/rest/httpx"
 	"github.com/anyinone/go-zero/rest/internal/cors"
 	"github.com/anyinone/go-zero/rest/router"
-	"github.com/anyinone/go-zero/rest/signalr"
 )
 
 type (
@@ -77,19 +74,6 @@ func (s *Server) AddRoutes(rs []Route, opts ...RouteOption) {
 // AddRoute adds given route into the Server.
 func (s *Server) AddRoute(r Route, opts ...RouteOption) {
 	s.AddRoutes([]Route{r}, opts...)
-}
-
-// AddHub add given signalr hub into the Server
-func (s *Server) AddHub(path string, hubFactory func() signalr.HubInterface) signalr.HubClients {
-	server, _ := signalr.NewServer(context.Background(),
-		signalr.HubFactory(hubFactory),
-		signalr.EnableDetailedErrors(false),
-		signalr.TimeoutInterval(time.Duration(s.ngin.conf.Hub.Timeout)*time.Millisecond),
-		signalr.MaximumReceiveMessageSize(uint(s.ngin.conf.Hub.MaximumReceiveMessageSize)),
-		signalr.AllowOriginPatterns(strings.Split(s.ngin.conf.Hub.AllowOriginPatterns, ";")),
-		signalr.KeepAliveInterval(time.Duration(s.ngin.conf.Hub.KeepAliveInterval)*time.Millisecond))
-	s.router.HandleHub(path, server.HttpHandler())
-	return server.HubClients()
 }
 
 // AddProxy add given proxy into target server of request path start with match.

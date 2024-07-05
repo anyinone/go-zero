@@ -60,7 +60,7 @@ func (b *kubeBuilder) Build(target resolver.Target, cc resolver.ClientConn,
 			options.FieldSelector = nameSelector + svc.Name
 		}))
 	in := inf.Core().V1().Endpoints()
-	in.Informer().AddEventHandler(handler)
+	in.Informer()
 	threading.GoSafe(func() {
 		inf.Start(proc.Done())
 	})
